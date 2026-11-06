@@ -7,7 +7,9 @@
 - 🔑 首次使用配置 Cesium Ion Token（仅保存在浏览器 localStorage）
 - 🔍 任意地点搜索：Ion 地理编码 → OSM / Photon（超时自动重试）→ Ion 联想搜索，三级容错，任一源可用就不会卡住
 - ⏎ 输入后可直接按**回车**选中第一个结果，无需鼠标点击
-- 💬 搜索状态直接显示在页面顶部，**不用打开控制台**；点右上角「自检」可一键检查三个接口是否可用
+- 💬 搜索状态直接显示在页面顶部，**不用打开控制台**；点右上角「自检」可一键检查四个接口是否可用
+- 📋 右上角「日志 N/N」按钮把控制台的 error / warning 搬到页面上（同一条消息自动合并计数），排查问题时无需 F12
+- 🛰️ 影像 / 地形瓦片加载期间显示剩余数量，避免把"还在加载"误判成"页面坏了"
 - ✈️ 相机自动飞抵目标地点，倾斜视角环视周边
 - ⭕ 可切换 1 / 2 / 5 / 10 km 的"周边范围圈"标注
 - 🏔️ 全球三维地形 + OSM 建筑模型实时渲染
@@ -59,6 +61,20 @@ A：说明 Ion Token 有效（地形/建筑已加载），只是搜索接口异�
 - 备用源失败 → 检查浏览器能否访问 `photon.komoot.io`
 - 三项都正常但没有结果 → 换更具体的关键词，或用英文地名
 
+**Q：F12 开发者工具里显示若干"错误"和"问题"，要紧吗？**
+
+A：区分三类，逐一对照：
+
+1. **项目代码产生的 console.error / warn**：以 v2.3 为界，之前主要由「周边范围圈」引起 —— `Primitive outlines disable imagery draping`（贴地带描边椭圆会让 Cesium 跳过影像贴合，底图变纯色）、`Entity ... with heightReference must also have a defined height`、`Entity geometry outlines are unsupported on terrain`，外加 OSM 建筑默认开启的模型轮廓。现已全部修复：范围圈改为「独立贴地边界线」，建筑用 `createOsmBuildingsAsync({ enableShowOutline: false, showOutline: false })` 从加载阶段关掉轮廓。实测完整流程后页面日志为 **0 错误 / 0 警告**。
+2. **Ion 地理编码接口 401 / 405 / CORS 预检失败**：旧版接口路径与鉴权写错导致，已在 `ab17bc0` 修复；若 Console 里仍看得见，多半是历史日志（开了 Preserve log 会跨刷新保留），点 Console 左上角的 🚫 清空后刷新即可。
+3. **DevTools 右侧「Issues / 问题」面板**：多为浏览器对第三方跨站资源的提示（Cookie 的 SameSite / 第三方 Cookie 限制、弃用 API 等），来自 `cesium.com` 等外部域名，不是本项目脚本错误，也不影响渲染。**判断标准**：点右上角「日志」按钮，只要显示 `0/0`，就说明页面运行时没有产生任何 console 错误或警告。
+
+如果清空并刷新后 Console 仍有红字，把具体文本发来即可定位。
+
+**Q：地球只有一片纯色 / 星空，看不到影像？**
+
+A：通常是 Ion 影像、地形瓦片还在下载（国内网络下可能十几秒到几十秒），此时 globe 显示的是 Cesium 的底色。页面左下（或中央）会显示「正在加载影像 / 地形瓦片…（剩余 N）」，等它消失即可。若长时间不消失，点「自检」确认 Ion 地形资产是否 `HTTP 200`；不是 200 则检查网络 / 代理。
+
 **Q：Token 保存在哪里？**
 
 A：只存在浏览器 localStorage，不写入代码、不提交到 GitHub。
@@ -67,9 +83,10 @@ A：只存在浏览器 localStorage，不写入代码、不提交到 GitHub。
 
 ```
 gis-3d-explorer/
-├── index.html      # 页面骨架
-├── css/style.css   # 界面样式
-└── js/app.js       # 核心逻辑（Token 校验 / 搜索 / 飞抵 / 标注）
+├── index.html            # 页面骨架
+├── css/style.css         # 界面样式
+├── js/console-capture.js # 页面内控制台日志捕获器（须最先加载）
+└── js/app.js             # 核心逻辑（Token 校验 / 搜索 / 飞抵 / 标注）
 ```
 
 ## Roadmap

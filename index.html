@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>足迹 · 三维周边探索</title>
+  <link rel="icon" href="data:," />
+  <script src="js/console-capture.js"></script>
   <script src="https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/Cesium.js"></script>
   <link href="https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
@@ -38,6 +40,7 @@
         <div id="results" class="results hidden"></div>
       </div>
       <button id="diagBtn" class="diag-btn" type="button" title="检查搜索接口是否可用">自检</button>
+      <button id="logBtn" class="diag-btn" type="button" title="查看页面捕获到的控制台错误与警告">日志 0/0</button>
     </div>
 
     <div id="statusBar" class="status-bar hidden"></div>
@@ -49,6 +52,18 @@
       </div>
       <div id="diagBody" class="diag-body"></div>
       <p class="diag-note">结果直接显示在这里，无需打开浏览器控制台。</p>
+    </div>
+
+    <div id="logPanel" class="diag-panel log-panel hidden">
+      <div class="diag-head">
+        <span>控制台日志（页面内捕获）</span>
+        <span>
+          <button id="logClear" type="button" title="清空">清空</button>
+          <button id="logClose" type="button" title="关闭">✕</button>
+        </span>
+      </div>
+      <div id="logBody" class="log-body"></div>
+      <p class="diag-note">错误数 / 警告数显示在顶部「日志」按钮上；同一条消息会自动合并计数。</p>
     </div>
 
     <div id="infoCard" class="info-card hidden">

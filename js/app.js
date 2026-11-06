@@ -8,7 +8,7 @@
 window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/';
 
 const TOKEN_KEY = 'cesium_ion_token';
-const APP_VERSION = 'v2.1';
+const APP_VERSION = 'v2.3';
 // Ion 的 Pelias 地理编码：路径 /v1/geocode/search，参数 text + access_token
 const ION_GEOCODE_BASE = 'https://api.cesium.com/v1/geocode/';
 // 备用源：OSM / Photon，免 Token
@@ -117,6 +117,7 @@ function submitToken() {
 }
 
 async function bootWithToken(token) {
+  loadingTip.textContent = '正在加载三维数据…';
   loadingTip.classList.remove('hidden');
   currentToken = token;
   Cesium.Ion.defaultAccessToken = token;
@@ -136,12 +137,29 @@ async function bootWithToken(token) {
     });
     viewer.scene.globe.enableLighting = true;
     viewer.scene.globe.depthTestAgainstTerrain = true;
+
+    // 影像/地形瓦片在国内网络下可能要等十几秒，期间 globe 只是一片纯色，
+    // 很容易被误认为"页面坏了"。这里把加载进度直接显示在页面上。
+    viewer.scene.globe.tileLoadProgressEvent.addEventListener((pending) => {
+      if (pending > 0) {
+        loadingTip.textContent = '正在加载影像 / 地形瓦片…（剩余 ' + pending + '）';
+        loadingTip.classList.remove('hidden');
+      } else {
+        loadingTip.classList.add('hidden');
+      }
+    });
   }
 
   // 用"世界地形 + OSM 建筑"来验证 Token 是否有效
   try {
     viewer.terrainProvider = await Cesium.createWorldTerrainAsync();
-    const buildings = await Cesium.createOsmBuildingsAsync();
+    // enableShowOutline:false 从加载阶段就不生成轮廓几何，避免 Cesium 输出
+    // "Primitive outlines disable imagery draping" 并跳过影像贴合。
+    // （只在创建后设 showOutline=false 太晚，轮廓 primitive 已经建好了）
+    const buildings = await Cesium.createOsmBuildingsAsync({
+      enableShowOutline: false,
+      showOutline: false,
+    });
     viewer.scene.primitives.add(buildings);
   } catch (err) {
     loadingTip.classList.add('hidden');
@@ -450,19 +468,27 @@ function drawPlace(lon, lat, radius) {
     },
   });
 
-  const circle = viewer.entities.add({
-    position,
-    ellipse: {
-      semiMajorAxis: radius,
-      semiMinorAxis: radius,
-      material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.15),
-      outline: true,
-      outlineColor: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.8),
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+  // 不画贴地 ellipse 填充：Cesium 会把贴地椭圆拆成扇形三角片，
+  // 半透明材质在起伏地形上叠加后会出现深色三角扇伪影（且会触发
+  // outline/imagery-draping 相关警告）。仅用边界线表达范围，干净且零警告。
+  // 边界改用独立的贴地折线，避免地形上的 outline 不支持问题
+  const flatPositions = [];
+  const latSpan = radius / 111320;
+  const lonSpan = radius / (111320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+  for (let i = 0; i <= 64; i += 1) {
+    const angle = (i / 64) * Math.PI * 2;
+    flatPositions.push(lon + lonSpan * Math.cos(angle), lat + latSpan * Math.sin(angle));
+  }
+  const border = viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(flatPositions),
+      width: 3,
+      clampToGround: true,
+      material: Cesium.Color.fromCssColorString('#2563eb').withAlpha(0.95),
     },
   });
 
-  entities = [pin, circle];
+  entities = [pin, border];
 }
 
 function flyToPlace(lon, lat, radius) {

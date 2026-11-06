@@ -204,6 +204,27 @@ html, body {
 .diag-line.fail { background: #fef2f2; color: #991b1b; }
 .diag-note { color: var(--text-soft); margin-top: 10px; line-height: 1.5; }
 
+.log-panel { bottom: 68px; left: auto; right: 16px; width: min(460px, 94vw); }
+.diag-head span:last-child { display: flex; gap: 8px; }
+.log-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.log-line {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  font-size: 11px;
+  line-height: 1.55;
+  word-break: break-all;
+  color: var(--text);
+}
+.log-line.error { background: #fef2f2; color: #991b1b; }
+.log-line.warn { background: #fffbeb; color: #92400e; }
+
 /* ---------- 信息卡片 ---------- */
 .info-card {
   position: absolute;
