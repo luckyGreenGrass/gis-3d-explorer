@@ -7,13 +7,19 @@
 window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/';
 
 const TOKEN_KEY = 'cesium_ion_token';
-const ION_GEOCODE_URL = 'https://api.cesium.com/v1/geocode?q=';
+// Ion 的 Pelias 地理编码：路径 /v1/geocode/search，参数 text + access_token
+// 注意：鉴权走 access_token 查询参数，不能用 Authorization 头（会触发 CORS 预检失败）
+const ION_GEOCODE_BASE = 'https://api.cesium.com/v1/geocode/';
+// 备用源：OSM / Photon，免 Token，Ion 地理编码不可用（权限/网络）时自动兜底
+const PHOTON_GEOCODE_URL = 'https://photon.komoot.io/api/';
 
 let viewer = null;
 let currentToken = null;
-let currentPlace = null;   // { name, lon, lat, bbox }
+let currentPlace = null;   // { name, lon, lat }
 let entities = [];         // 当前标注（点 + 范围圈）
 let searchTimer = null;
+let searchSeq = 0;         // 丢弃过期请求的结果
+let lastPhotonAt = 0;      // 备用源简单限流
 
 /* ---------------- DOM ---------------- */
 const tokenGate = document.getElementById('tokenGate');
@@ -104,7 +110,7 @@ searchInput.addEventListener('input', () => {
     hideResults();
     return;
   }
-  searchTimer = setTimeout(() => doSearch(q), 350);
+  searchTimer = setTimeout(() => doSearch(q), 450);
 });
 
 searchInput.addEventListener('keydown', (e) => {
@@ -118,33 +124,97 @@ document.addEventListener('click', (e) => {
 });
 
 async function doSearch(q) {
+  const seq = ++searchSeq;
+  const ionUrl =
+    ION_GEOCODE_BASE +
+    'search?text=' + encodeURIComponent(q) +
+    '&access_token=' + encodeURIComponent(currentToken);
+
   try {
-    const resp = await fetch(
-      ION_GEOCODE_URL + encodeURIComponent(q),
-      { headers: { Authorization: 'Bearer ' + currentToken } }
-    );
-    if (!resp.ok) throw new Error('geocode ' + resp.status);
+    const resp = await fetch(ionUrl);
+    if (!resp.ok) {
+      let detail = '';
+      try {
+        const j = await resp.json();
+        detail = j.message || j.code || '';
+      } catch (_) { /* 忽略非 JSON 响应 */ }
+      throw new Error('Ion ' + resp.status + (detail ? ' · ' + detail : ''));
+    }
     const data = await resp.json();
-    renderResults(data.features || []);
+    if (seq !== searchSeq) return;
+    const features = data.features || [];
+    if (features.length) {
+      renderResults(features, 'ion');
+    } else {
+      await searchByPhoton(q, seq, '');
+    }
   } catch (err) {
-    console.error(err);
-    showResultsEmpty('搜索失败，请检查网络或 Token。');
+    if (seq !== searchSeq) return;
+    console.warn('[geocode] Ion 搜索失败：', err.message);
+    await searchByPhoton(q, seq, err.message);
   }
 }
 
-function renderResults(features) {
+/* 备用地理编码：OSM / Photon，免 Token、支持中文地名 */
+async function searchByPhoton(q, seq, reason) {
+  const wait = Math.max(0, 1000 - (Date.now() - lastPhotonAt));
+  if (wait) await new Promise((r) => setTimeout(r, wait));
+  if (seq !== searchSeq) return;
+  lastPhotonAt = Date.now();
+
+  try {
+    const resp = await fetch(
+      PHOTON_GEOCODE_URL + '?q=' + encodeURIComponent(q) + '&limit=8'
+    );
+    if (!resp.ok) throw new Error('Photon ' + resp.status);
+    const data = await resp.json();
+    if (seq !== searchSeq) return;
+
+    const features = (data.features || []).map((f) => {
+      const props = { ...(f.properties || {}) };
+      props.label = photonLabel(props);
+      return { ...f, properties: props };
+    });
+    if (features.length) {
+      renderResults(features, 'photon');
+    } else {
+      showResultsEmpty('没有找到匹配的地点。' + (reason ? '（' + reason + '）' : ''));
+    }
+  } catch (err) {
+    if (seq !== searchSeq) return;
+    console.error(err);
+    showResultsEmpty(
+      '搜索失败：' + (reason || '未知原因') +
+      '；备用源也不可用，请检查网络或 Token 权限。'
+    );
+  }
+}
+
+function photonLabel(p) {
+  const parts = [p.name, p.street, p.district, p.city, p.state, p.country]
+    .filter((v, i, a) => v && a.indexOf(v) === i);
+  return parts.join('，') || '未知地点';
+}
+
+function renderResults(features, source) {
   if (!features.length) {
     showResultsEmpty('没有找到匹配的地点。');
     return;
   }
   resultsBox.innerHTML = '';
+  if (source === 'photon') {
+    const note = document.createElement('div');
+    note.className = 'source-note';
+    note.textContent = 'Ion 地理编码不可用，已自动切换备用源（OSM / Photon）';
+    resultsBox.appendChild(note);
+  }
   features.slice(0, 8).forEach((f) => {
     const props = f.properties || {};
-    const name = props.display_name || props.name || '未知地点';
+    const name = props.label || props.display_name || props.name || '未知地点';
     const item = document.createElement('div');
     item.className = 'result-item';
     const main = document.createElement('div');
-    main.textContent = name.split(',')[0];
+    main.textContent = String(name).split(/[,，]/)[0];
     const sub = document.createElement('div');
     sub.className = 'sub';
     sub.textContent = name;
@@ -199,7 +269,7 @@ function goToFeature(feature, name) {
   );
   currentPlace = { name, lon, lat };
 
-  placeNameEl.textContent = name.split(',')[0];
+  placeNameEl.textContent = String(name).split(/[,，]/)[0];
   placeCoordsEl.textContent =
     '经度 ' + lon.toFixed(4) + '  ·  纬度 ' + lat.toFixed(4);
   infoCard.classList.remove('hidden');

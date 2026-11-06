@@ -32,6 +32,27 @@ npx serve .
 2. 打开 https://ion.cesium.com/tokens 复制默认 Token
 3. 粘贴进页面首个弹窗即可
 
+## 数据说明
+
+- **三维地形 / 建筑**：Cesium Ion（World Terrain + OSM Buildings），需要 Ion Token
+- **地名搜索**：优先使用 Ion 地理编码（`GET /v1/geocode/search?text=…&access_token=…`）；
+  若 Ion 返回 401/403（如 Token 未开通 geocode 权限）或网络不可达，会自动切换到免 Token 的
+  OSM / Photon 备用源，并在下拉框顶部提示当前来源。
+
+## 常见问题
+
+**Q：搜索时提示"搜索失败，请检查网络或 Token"？**
+
+A：早期版本的接口路径/鉴权写错已修复。若仍失败，打开浏览器 F12 控制台看 `[geocode]` 开头的日志：
+
+- `Ion 401 · Invalid access token` → Token 复制不完整，重新粘贴
+- `Ion 403` / `Token does not have permission` → 该 Token 未开通地理编码权限，应用已自动用备用源，可忽略
+- 备用源也失败 → 检查网络能否访问 `api.cesium.com` 与 `photon.komoot.io`
+
+**Q：Token 保存在哪里？**
+
+A：只存在浏览器 localStorage，不写入代码、不提交到 GitHub。
+
 ## 目录结构
 
 ```
