@@ -39,11 +39,33 @@
         <input id="searchInput" type="text" placeholder="搜索想去的地点，如：杭州西湖、京都伏见稻荷…" autocomplete="off" />
         <div id="results" class="results hidden"></div>
       </div>
+      <button id="photoBtn" class="diag-btn photo-btn" type="button" title="从照片的 EXIF GPS 定位拍摄地">📷 照片</button>
       <button id="diagBtn" class="diag-btn" type="button" title="检查搜索接口是否可用">自检</button>
       <button id="logBtn" class="diag-btn" type="button" title="查看页面捕获到的控制台错误与警告">日志 0/0</button>
     </div>
 
     <div id="statusBar" class="status-bar hidden"></div>
+
+    <!-- 照片定位面板 -->
+    <div id="photoPanel" class="photo-panel hidden">
+      <div class="diag-head">
+        <span>照片定位 · 读取 EXIF GPS</span>
+        <button id="photoPanelClose" type="button" title="关闭">✕</button>
+      </div>
+      <div id="dropZone" class="drop-zone">
+        <div class="drop-icon">📷</div>
+        <div class="drop-main">把照片拖到这里</div>
+        <div class="drop-sub">或点击下方按钮选择文件</div>
+      </div>
+      <div class="photo-actions">
+        <button id="pickPhotoBtn" class="primary-btn" type="button">选择本地照片</button>
+        <button id="samplePhotoBtn" class="diag-btn" type="button">试用内置示例</button>
+      </div>
+      <p id="photoMsg" class="photo-msg hidden"></p>
+      <p class="diag-note">支持含 EXIF 的 JPG / TIFF / HEIC 原图；照片只在浏览器本地解析，不会上传也不会保存。<br />微信 / QQ 压缩过的图片和截图通常不含 GPS 信息。</p>
+      <input id="photoInput" class="hidden" type="file"
+             accept="image/jpeg,image/tiff,image/heic,image/heif,image/png,.jpg,.jpeg,.tif,.tiff,.heic,.heif" />
+    </div>
 
     <div id="diagPanel" class="diag-panel hidden">
       <div class="diag-head">
@@ -84,9 +106,29 @@
       <p class="hint">按住鼠标右键拖动可平移，中键缩放，左键拖动旋转视角。</p>
     </div>
 
+    <!-- 照片定位：锚点 → 引线 → 缩略图卡片 -->
+    <svg id="leaderSvg" class="leader-svg hidden" width="100%" height="100%">
+      <path id="leaderPath" class="leader-path" d="" />
+      <circle id="leaderDot" class="leader-dot" cx="0" cy="0" r="5" />
+    </svg>
+    <div id="photoAnchor" class="photo-anchor hidden"></div>
+    <div id="photoCard" class="photo-card hidden">
+      <div class="photo-card-head">
+        <span>📷 照片拍摄地</span>
+        <button id="photoCardClose" class="icon-btn" type="button" title="关闭照片标注">✕</button>
+      </div>
+      <img id="photoThumb" class="photo-thumb" alt="照片缩略图" />
+      <div id="photoMeta" class="photo-meta"></div>
+      <div id="photoCoords" class="photo-coords"></div>
+    </div>
+
+    <!-- 全屏拖放提示 -->
+    <div id="dropHint" class="drop-hint hidden">松开鼠标 · 读取照片拍摄地点</div>
+
     <div id="loadingTip" class="loading-tip hidden">正在加载三维数据…</div>
   </div>
 
+  <script src="js/vendor/exifr.full.umd.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

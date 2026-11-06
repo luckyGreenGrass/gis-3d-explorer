@@ -8,7 +8,7 @@
 window.CESIUM_BASE_URL = 'https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/';
 
 const TOKEN_KEY = 'cesium_ion_token';
-const APP_VERSION = 'v2.3';
+const APP_VERSION = 'v3.0';
 // Ion 的 Pelias 地理编码：路径 /v1/geocode/search，参数 text + access_token
 const ION_GEOCODE_BASE = 'https://api.cesium.com/v1/geocode/';
 // 备用源：OSM / Photon，免 Token
@@ -22,6 +22,8 @@ let entities = [];         // 当前标注（点 + 范围圈）
 let searchTimer = null;
 let searchSeq = 0;         // 丢弃过期请求的结果
 let statusTimer = null;
+let photoCartesian = null; // 照片拍摄点的世界坐标（用于引线跟随）
+let photoObjectUrl = null; // 缩略图的本地 URL，切换照片时释放
 
 /* ---------------- DOM ---------------- */
 const tokenGate = document.getElementById('tokenGate');
@@ -42,6 +44,26 @@ const placeCoordsEl = document.getElementById('placeCoords');
 const closeInfoBtn = document.getElementById('closeInfo');
 const radiusGroup = document.getElementById('radiusGroup');
 const loadingTip = document.getElementById('loadingTip');
+
+/* 照片定位相关 DOM */
+const photoBtn = document.getElementById('photoBtn');
+const photoPanel = document.getElementById('photoPanel');
+const photoPanelClose = document.getElementById('photoPanelClose');
+const pickPhotoBtn = document.getElementById('pickPhotoBtn');
+const samplePhotoBtn = document.getElementById('samplePhotoBtn');
+const photoInput = document.getElementById('photoInput');
+const photoMsg = document.getElementById('photoMsg');
+const dropZone = document.getElementById('dropZone');
+const dropHint = document.getElementById('dropHint');
+const leaderSvg = document.getElementById('leaderSvg');
+const leaderPath = document.getElementById('leaderPath');
+const leaderDot = document.getElementById('leaderDot');
+const photoAnchor = document.getElementById('photoAnchor');
+const photoCard = document.getElementById('photoCard');
+const photoCardClose = document.getElementById('photoCardClose');
+const photoThumb = document.getElementById('photoThumb');
+const photoMeta = document.getElementById('photoMeta');
+const photoCoords = document.getElementById('photoCoords');
 
 /* ---------------- 页面内状态条 ---------------- */
 function setStatus(msg, kind) {
@@ -148,6 +170,9 @@ async function bootWithToken(token) {
         loadingTip.classList.add('hidden');
       }
     });
+
+    // 照片缩略图卡片随相机运动实时跟随锚点
+    viewer.scene.postRender.addEventListener(updatePhotoOverlay);
   }
 
   // 用"世界地形 + OSM 建筑"来验证 Token 是否有效
@@ -433,6 +458,7 @@ function extractCoords(feature) {
 }
 
 function goToFeature(feature, name) {
+  hidePhotoOverlay();          // 地名搜索与照片标注互斥，避免两套标注叠加
   const coords = extractCoords(feature);
   if (!coords) {
     setStatus('该结果没有可用坐标，换个关键词试试', 'error');
@@ -530,6 +556,350 @@ radiusGroup.addEventListener('click', (e) => {
     flyToPlace(currentPlace.lon, currentPlace.lat, radius);
   }
 });
+
+/* ---------------- 照片定位（EXIF GPS） ---------------- *
+ * 用项目本地的 exifr 解析照片 EXIF，取出拍摄点经纬度，飞抵该点后
+ * 引出一张随相机实时跟随的缩略图卡片。照片全程只在浏览器本地处理，
+ * 不上传、不写入代码、也不会提交到 GitHub。                       */
+
+photoBtn.addEventListener('click', () => {
+  const willOpen = photoPanel.classList.contains('hidden');
+  if (willOpen) photoMsg.classList.add('hidden');
+  photoPanel.classList.toggle('hidden', !willOpen);
+  photoBtn.classList.toggle('active', willOpen);
+});
+photoPanelClose.addEventListener('click', () => {
+  photoPanel.classList.add('hidden');
+  photoBtn.classList.remove('active');
+});
+pickPhotoBtn.addEventListener('click', () => photoInput.click());
+dropZone.addEventListener('click', () => photoInput.click());
+samplePhotoBtn.addEventListener('click', loadSamplePhoto);
+photoInput.addEventListener('change', () => {
+  const file = photoInput.files && photoInput.files[0];
+  if (file) handlePhotoFile(file);
+  photoInput.value = '';           // 允许连续选择同一张照片
+});
+photoCardClose.addEventListener('click', hidePhotoOverlay);
+
+// 点击缩略图看大图
+photoThumb.addEventListener('click', () => {
+  if (!photoThumb.getAttribute('src')) return;
+  const box = document.createElement('div');
+  box.className = 'photo-lightbox';
+  const big = document.createElement('img');
+  big.src = photoThumb.src;
+  big.alt = '照片大图';
+  box.appendChild(big);
+  box.addEventListener('click', () => box.remove());
+  document.body.appendChild(box);
+});
+photoThumb.addEventListener('error', () => {
+  // HEIC 等格式：GPS 能读到，但浏览器无法渲染图片，给出明确说明
+  photoThumb.alt = '该格式浏览器无法预览（拍摄地点已成功定位）';
+});
+
+/* 全屏拖放 */
+let dragDepth = 0;
+function dragHasFiles(e) {
+  return !!(e.dataTransfer &&
+    Array.from(e.dataTransfer.types || []).indexOf('Files') !== -1);
+}
+document.addEventListener('dragenter', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth += 1;
+  dropHint.classList.remove('hidden');
+  dropZone.classList.add('over');
+});
+document.addEventListener('dragover', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('dragleave', () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) {
+    dropHint.classList.add('hidden');
+    dropZone.classList.remove('over');
+  }
+});
+document.addEventListener('drop', (e) => {
+  if (!dragHasFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  dropHint.classList.add('hidden');
+  dropZone.classList.remove('over');
+  const file = e.dataTransfer.files && e.dataTransfer.files[0];
+  if (file) handlePhotoFile(file);
+});
+
+async function loadSamplePhoto() {
+  setStatus('正在读取内置示例照片…');
+  try {
+    const resp = await fetch('assets/sample-with-gps.jpg');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const blob = await resp.blob();
+    const file = new File([blob], '示例照片 · 杭州西湖.jpg', { type: 'image/jpeg' });
+    await handlePhotoFile(file);
+  } catch (err) {
+    setStatus('示例照片读取失败：' + String((err && err.message) || err), 'error');
+  }
+}
+
+async function handlePhotoFile(file) {
+  if (!viewer) {
+    setStatus('请先配置 Cesium Ion Token，再读取照片', 'error');
+    return;
+  }
+  if (typeof exifr === 'undefined') {
+    setStatus('EXIF 解析库未加载，请强制刷新页面（Ctrl + F5）', 'error');
+    return;
+  }
+
+  setStatus('正在解析「' + file.name + '」的 EXIF…');
+  try {
+    const [gps, tags] = await Promise.all([
+      exifr.gps(file).catch(() => null),
+      exifr.parse(file, { tiff: true, ifd0: true, exif: true, gps: true })
+        .catch(() => ({})),
+    ]);
+
+    const coord = extractGps(gps, tags);
+    if (!coord) {
+      // 明确区分「文件根本没有 EXIF」和「有 EXIF 但没有定位字段」
+      const keys = tags ? Object.keys(tags) : [];
+      const gpsKeys = keys.filter((k) => /gps|lat|lon/i.test(k));
+      const diag = keys.length === 0
+        ? '文件不含任何 EXIF 元数据'
+        : '读到 ' + keys.length + ' 个 EXIF 字段，' +
+          (gpsKeys.length
+            ? '疑似定位字段：' + gpsKeys.slice(0, 6).join('、')
+            : '其中没有任何定位字段');
+      setPhotoMsg(
+        '未读到拍摄坐标 · ' + diag +
+        '。请用相机原图：拍照时开启定位，传图时关闭「压缩图片」。',
+        false
+      );
+      photoPanel.classList.remove('hidden');
+      photoBtn.classList.add('active');
+      setStatus('「' + file.name + '」没有 GPS 信息，详情见照片面板', 'error');
+      return;
+    }
+    const { lat, lon } = coord;
+    setPhotoMsg('已读取拍摄坐标，见地图标注。', true);
+
+    // 缩略图用本地 object URL，切换照片时释放上一个
+    if (photoObjectUrl) URL.revokeObjectURL(photoObjectUrl);
+    photoObjectUrl = URL.createObjectURL(file);
+    photoThumb.alt = '照片缩略图';
+    photoThumb.src = photoObjectUrl;
+
+    const dateVal = tags && (tags.DateTimeOriginal || tags.CreateDate || tags.DateTime);
+    const camera = [tags && tags.Make, tags && tags.Model]
+      .filter(Boolean).join(' ').trim();
+    const rows = [
+      ['拍摄时间', formatExifDate(dateVal)],
+      ['相机', camera || '未记录'],
+      ['文件', file.name],
+    ];
+    if (tags && Number.isFinite(tags.GPSAltitude)) {
+      rows.push(['海拔', Number(tags.GPSAltitude).toFixed(1) + ' m']);
+    }
+    renderPhotoMeta(rows);
+
+    photoCoords.textContent =
+      '纬度 ' + Math.abs(lat).toFixed(4) + '° ' + (lat >= 0 ? 'N' : 'S') +
+      '  ·  经度 ' + Math.abs(lon).toFixed(4) + '° ' + (lon >= 0 ? 'E' : 'W');
+
+    showPhotoOnMap(lon, lat);
+    setStatus('已在地图上标出「' + file.name + '」的拍摄地点', 'ok');
+  } catch (err) {
+    setStatus('照片解析失败：' + String((err && err.message) || err) +
+      '（请确认是 JPG / TIFF / HEIC 原图）', 'error');
+  }
+}
+
+/* 多来源提取经纬度：
+ * 1) exifr.gps() 已按 N/S/E/W 换算好的十进制值（最常用）
+ * 2) parse() 返回的 latitude / longitude
+ * 3) 原始 GPSLatitude / GPSLongitude（可能是度分秒数组，也可能已是数字）
+ *    —— 部分相机、安卓机型只写原始标签，gps() 会返回 undefined */
+function isNumericValue(v) {
+  if (typeof v === 'number') return Number.isFinite(v);
+  if (typeof v === 'string') return v.trim() !== '' && Number.isFinite(Number(v));
+  return false;
+}
+
+function coordFromTag(value, ref, negativeRefs) {
+  let dec = NaN;
+  if (Array.isArray(value)) {
+    const d = Number(value[0]);
+    const m = Number(value[1] || 0);
+    const s = Number(value[2] || 0);
+    if (Number.isFinite(d)) dec = d + m / 60 + s / 3600;
+  } else if (isNumericValue(value)) {
+    dec = Number(value);
+  }
+  if (!Number.isFinite(dec)) return NaN;
+  if (negativeRefs.indexOf(String(ref || '').toUpperCase()) !== -1) dec = -dec;
+  return dec;
+}
+
+function extractGps(gps, tags) {
+  const t = tags || {};
+  let lat = gps && isNumericValue(gps.latitude) ? Number(gps.latitude) : NaN;
+  let lon = gps && isNumericValue(gps.longitude) ? Number(gps.longitude) : NaN;
+  if (!Number.isFinite(lat) && isNumericValue(t.latitude)) lat = Number(t.latitude);
+  if (!Number.isFinite(lon) && isNumericValue(t.longitude)) lon = Number(t.longitude);
+  if (!Number.isFinite(lat)) {
+    lat = coordFromTag(t.GPSLatitude, t.GPSLatitudeRef, ['S']);
+  }
+  if (!Number.isFinite(lon)) {
+    lon = coordFromTag(t.GPSLongitude, t.GPSLongitudeRef, ['W']);
+  }
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) ||
+      lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return null;
+  }
+  return { lat, lon };
+}
+
+function setPhotoMsg(text, ok) {
+  photoMsg.textContent = text;
+  photoMsg.className = 'photo-msg' + (ok ? ' ok' : '');
+  photoMsg.classList.remove('hidden');
+}
+
+function formatExifDate(v) {
+  if (!v) return '未记录';
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return v.toLocaleString('zh-CN', { hour12: false });
+  }
+  return String(v);
+}
+
+function renderPhotoMeta(rows) {
+  photoMeta.innerHTML = '';
+  rows.forEach(([label, value]) => {
+    const div = document.createElement('div');
+    const b = document.createElement('b');
+    b.textContent = label + '：';
+    div.appendChild(b);
+    div.appendChild(document.createTextNode(value));  // 文件名等用文本节点，避免注入
+    photoMeta.appendChild(div);
+  });
+}
+
+function showPhotoOnMap(lon, lat) {
+  clearEntities();
+  currentPlace = null;
+  infoCard.classList.add('hidden');
+  photoPanel.classList.add('hidden');
+  photoBtn.classList.remove('active');
+  hideResults();
+
+  // 抬高 30 m：既避免被地形埋住，也让椭球遮挡判断在地表点上更稳定
+  const position = Cesium.Cartesian3.fromDegrees(lon, lat, 30);
+  const pin = viewer.entities.add({
+    position,
+    point: {
+      pixelSize: 14,
+      color: Cesium.Color.fromCssColorString('#f59e0b'),
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 3,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  });
+  entities = [pin];
+  photoCartesian = position;
+
+  photoCard.classList.remove('hidden');
+  photoCard.style.visibility = '';
+  leaderSvg.classList.remove('hidden');
+  photoAnchor.classList.remove('hidden');
+  updatePhotoOverlay();          // 先定位一次，不必等下一帧
+
+  viewer.camera.flyToBoundingSphere(
+    new Cesium.BoundingSphere(position, 700),
+    {
+      duration: 2.4,
+      offset: new Cesium.HeadingPitchRange(
+        0, Cesium.Math.toRadians(-40), 2100
+      ),
+    }
+  );
+}
+
+/* 每帧把锚点的世界坐标投影到屏幕，更新引线、光环和卡片位置 */
+function updatePhotoOverlay() {
+  if (!viewer || !photoCartesian || photoCard.classList.contains('hidden')) return;
+
+  const scene = viewer.scene;
+  const toWindow = Cesium.SceneTransforms.worldToWindowCoordinates ||
+                   Cesium.SceneTransforms.wgs84ToWindowCoordinates;
+  const win = toWindow ? toWindow(scene, photoCartesian) : null;
+  const w = scene.canvas.clientWidth;
+  const h = scene.canvas.clientHeight;
+  const occluder = new Cesium.EllipsoidalOccluder(
+    Cesium.Ellipsoid.WGS84, viewer.camera.positionWC
+  );
+  const pad = 80;
+
+  // 转到地球背面、或锚点跑出视口时暂时隐藏，转回来会自动恢复
+  if (!win || !occluder.isPointVisible(photoCartesian) ||
+      win.x < -pad || win.x > w + pad || win.y < -pad || win.y > h + pad) {
+    leaderSvg.classList.add('hidden');
+    photoAnchor.classList.add('hidden');
+    photoCard.style.visibility = 'hidden';
+    return;
+  }
+  leaderSvg.classList.remove('hidden');
+  photoAnchor.classList.remove('hidden');
+  photoCard.style.visibility = 'visible';
+
+  const ax = win.x;
+  const ay = win.y;
+  const cardW = photoCard.offsetWidth || 242;
+  const cardH = photoCard.offsetHeight || 250;
+  // 默认放在锚点右侧偏上，再夹到视口内，避免卡片被裁掉
+  const cx = Math.min(Math.max(16, ax + 110), Math.max(16, w - cardW - 16));
+  const cy = Math.min(
+    Math.max(86, ay - cardH * 0.72),
+    Math.max(86, h - cardH - 16)
+  );
+
+  photoCard.style.left = cx + 'px';
+  photoCard.style.top = cy + 'px';
+  photoAnchor.style.left = ax + 'px';
+  photoAnchor.style.top = ay + 'px';
+  leaderDot.setAttribute('cx', ax);
+  leaderDot.setAttribute('cy', ay);
+  // 平滑贝塞尔曲线：从锚点水平出发，水平进入卡片左边缘中点
+  const joinX = cx;
+  const joinY = cy + cardH * 0.55;
+  leaderPath.setAttribute(
+    'd',
+    'M ' + ax + ' ' + ay +
+    ' C ' + (ax + 60) + ' ' + ay +
+    ', ' + (joinX - 60) + ' ' + joinY +
+    ', ' + joinX + ' ' + joinY
+  );
+}
+
+function hidePhotoOverlay() {
+  photoCartesian = null;
+  photoCard.classList.add('hidden');
+  photoCard.style.visibility = '';
+  leaderSvg.classList.add('hidden');
+  photoAnchor.classList.add('hidden');
+  clearEntities();
+  if (photoObjectUrl) {
+    URL.revokeObjectURL(photoObjectUrl);
+    photoObjectUrl = null;
+  }
+  photoThumb.removeAttribute('src');
+}
 
 /* ---------------- 启动 ---------------- */
 (function init() {
