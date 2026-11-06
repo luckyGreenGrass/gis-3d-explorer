@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>足迹 · 三维周边探索</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.132/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+
+  <!-- Cesium Ion Token 配置门 -->
+  <div id="tokenGate" class="gate hidden">
+    <div class="gate-card">
+      <h1>足迹 · 三维周边探索</h1>
+      <p class="gate-sub">基于 Cesium Ion 的全球地形与建筑，帮你提前"走进"想去的城市。</p>
+      <ol class="gate-steps">
+        <li>注册/登录 <a href="https://ion.cesium.com/signup" target="_blank" rel="noopener">Cesium Ion</a>（免费）</li>
+        <li>在 <a href="https://ion.cesium.com/tokens" target="_blank" rel="noopener">Tokens 页面</a> 复制你的默认 Token</li>
+        <li>粘贴到下方输入框，Token 只保存在你的浏览器本地</li>
+      </ol>
+      <div class="gate-input-row">
+        <input id="tokenInput" type="password" placeholder="粘贴你的 Cesium Ion Token…" autocomplete="off" />
+        <button id="tokenBtn" type="button">进入地球</button>
+      </div>
+      <p id="tokenError" class="gate-error"></p>
+    </div>
+  </div>
+
+  <!-- 主界面：搜索与控制 -->
+  <div id="uiPanel" class="ui hidden">
+    <div class="search-bar">
+      <span class="logo">📍 足迹</span>
+      <div class="search-box">
+        <input id="searchInput" type="text" placeholder="搜索想去的地点，如：杭州西湖、京都伏见稻荷…" autocomplete="off" />
+        <div id="results" class="results hidden"></div>
+      </div>
+    </div>
+
+    <div id="infoCard" class="info-card hidden">
+      <div class="info-title-row">
+        <span id="placeName" class="place-name"></span>
+        <button id="closeInfo" class="icon-btn" title="清除标注">✕</button>
+      </div>
+      <div id="placeCoords" class="place-coords"></div>
+      <div class="radius-row">
+        <span>周边范围</span>
+        <div id="radiusGroup" class="radius-group">
+          <button class="radius-btn" data-r="1000">1 km</button>
+          <button class="radius-btn active" data-r="2000">2 km</button>
+          <button class="radius-btn" data-r="5000">5 km</button>
+          <button class="radius-btn" data-r="10000">10 km</button>
+        </div>
+      </div>
+      <p class="hint">按住鼠标右键拖动可平移，中键缩放，左键拖动旋转视角。</p>
+    </div>
+
+    <div id="loadingTip" class="loading-tip hidden">正在加载三维数据…</div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
