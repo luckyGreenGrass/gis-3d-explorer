@@ -37,6 +37,18 @@
         <input id="searchInput" type="text" placeholder="搜索想去的地点，如：杭州西湖、京都伏见稻荷…" autocomplete="off" />
         <div id="results" class="results hidden"></div>
       </div>
+      <button id="diagBtn" class="diag-btn" type="button" title="检查搜索接口是否可用">自检</button>
+    </div>
+
+    <div id="statusBar" class="status-bar hidden"></div>
+
+    <div id="diagPanel" class="diag-panel hidden">
+      <div class="diag-head">
+        <span>接口自检</span>
+        <button id="diagClose" type="button" title="关闭">✕</button>
+      </div>
+      <div id="diagBody" class="diag-body"></div>
+      <p class="diag-note">结果直接显示在这里，无需打开浏览器控制台。</p>
     </div>
 
     <div id="infoCard" class="info-card hidden">
